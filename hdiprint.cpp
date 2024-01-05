@@ -220,9 +220,6 @@ struct FileEntry {
     }
 
     bool isValid() {
-        // There are some files in which firstdatacluster is 0, but everything
-        // else still checks out for some reason...
-
         if (filename[0] == 0xE5) {
             return false;
         }
@@ -509,11 +506,15 @@ static void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
 
         for (uint16_t i = 0; i < entries; i++) {
             FileEntry *entry = (FileEntry *)(curBuffer + i * 32);
-            printFileEntry(*entry, depth * 4);
+
+            if(entry->isValid()){
+                printFileEntry(*entry, depth * 4);
+            }
 
             if (entry->isValid() && entry->isDirectory() &&
                 !entry->isDotOrDotDot()) {
-                printDirectoryRecursive(fatRegion, dataRegion, file,
+
+                printDirectoryRecursive(fatRegion, dataRegion, entry,
                                         clusterSize, depth + 1);
             }
         }
