@@ -46,7 +46,7 @@ class Fat12Inode {
 
     Fat12Inode(Fat12Volume &fat12Volume, FileEntry *file_,
                uint32_t &inodeCounter)
-        : file(file_), inode(inodeCounter) {
+        : file(file_), inode(inodeCounter), nlookup(0) {
         inodeCounter++;
 
         if (file->isDirectory() && !file->isDotOrDotDot()) {
@@ -1229,6 +1229,8 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
         Fat12Inode *child = rootInode.findInode(ino);
 
         if (child) {
+            printf("Lookup cur %lu, dec %lu\n", child->nlookup, nlookup);
+            
             child->nlookup -= nlookup;
 
             if (child->nlookup == 0 && child->zombie) {
@@ -1257,6 +1259,7 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
                 fuse_reply_err(req, 0);
                 return;
             }
+            
             printf("Ino has %lu lookups remaining\n", child->nlookup);
             fuse_reply_err(req, 0);
             return;
