@@ -457,9 +457,9 @@ static FatEntry getFatEntry(Region &regionFat, uint16_t i) {
     return {regionFat.ptr + idx, odd};
 };
 
-void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
-                             FileEntry *file, size_t clusterSize,
-                             uint32_t depth) {
+static void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
+                                    FileEntry *file, size_t clusterSize,
+                                    uint32_t depth) {
     uint16_t clusterNumber = file->firstDataClusterLow;
 
     while (clusterNumber != 0xFFF) {
@@ -470,15 +470,35 @@ void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
 
         for (uint16_t i = 0; i < entries; i++) {
             FileEntry *entry = (FileEntry *)(curBuffer + i * 32);
-            printFileEntry(*entry, depth * 4);
+
+            if(entry->isValid()){
+                printFileEntry(*entry, depth * 4);
+            }
 
             if (entry->isValid() && entry->isDirectory() &&
                 !entry->isDotOrDotDot()) {
-                printDirectoryRecursive(fatRegion, dataRegion, file,
+
+                printDirectoryRecursive(fatRegion, dataRegion, entry,
                                         clusterSize, depth + 1);
             }
         }
 
         clusterNumber = getFatEntry(fatRegion, clusterNumber).getValue();
+    }
+}
+
+void printRootDirectoryRecursive(Region &fatRegion, Region &dataRegion,
+                                        uint8_t *rootRegionBuffer, uint16_t entries,
+                                        size_t clusterSize) {
+    for (uint16_t i = 0; i < entries; i++) {
+        // TODO Replace
+        FileEntry *entry = (FileEntry *)(rootRegionBuffer + i * 32);
+
+        printFileEntry(*entry, 0);
+
+        if (entry->isValid() && entry->isDirectory()) {
+            printDirectoryRecursive(fatRegion, dataRegion, entry, clusterSize,
+                                    1);
+        }
     }
 }

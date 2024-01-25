@@ -10,7 +10,7 @@ volume once the image is properly umounted. Please check the section "Limitation
 first, as there are a few.
 
 ## Building:
-*make* will build the project and create 3 executables.
+*make* will build the project and create all executables.
 You will need libfuse3 installed to both build and run the hdifuse program.
 
 ## Running
@@ -34,15 +34,37 @@ contained in the HDI image.
 Execute via *./hdiprint 'HDIFILE'*
 
 ## hdifuse
-You may call hdifuse via *./hdifuse 'FILETOMOUNT' 'MOUNTPOINT'*
-
 hdifuse will scan each 512 bytes (which is the lowest sector size) and
 determine if there is code which suggest there is a FAT12 volume present.
 If there is an hit, it will try and mount the found volume. If this does not
 succeed it will keep scanning until ther next hit. If there is no volume present
 the program will exit.
 
+Execute via *./hdifuse 'FILETOMOUNT' 'MOUNTPOINT'*
+
 For debug output use the -d flag, i.e. *./hdifuse -d ...*
+
+## hdifdisk
+hdifdisk will do a non-exhaustive check on the first FAT12 volume in the given file
+and will print various information.
+
+You may call hdifdisk via *./hdifdisk 'HDIFILE'*
+
+For showing information on all clusters in the first fat table
+use *./hdifdisk -l 'HDIFILE'* or specify the FAT table indices after *-l*
+to show a selection
+
+hdifdisk will show found orphans, which are indices in the fat table, which are not
+referenced in any of the files on the file-system. This may or may not be an actual
+error.
+
+To modify an FAT12 index of the first fat table use *./hdifdisk -m 'index' -s 'value' 'HDIFILE'*
+Make sure to backup the image first.
+
+Example, to free orphans 33 and 1045 use ./hdifdisk -m 33 1045 -s 0 'HDIFILE'
+
+Please note afterwards this action will sync all fat tables in the fat region with the first
+fat table.
 
 ## Limitations
 Please note the following limitations:
@@ -58,4 +80,5 @@ Please note the following limitations:
 * There is no way to set MS-DOS specific attributes on files
 * Directory clusters which do not contain any valid files are not truncated
 * The only end of chain cluster considered is 0xFFF
+* On hdiprint/hdifdisk the right codepage, MS932, is not used to display filenames
 * There are probably lots of bugs

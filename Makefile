@@ -1,5 +1,5 @@
 
-all: hdimanip hdiprint hdifuse
+all: hdimanip hdiprint hdifuse hdifdisk
 
 CXXFLAGS ?= -Wall -Wextra -O2 -flto -std=gnu++17
 
@@ -12,5 +12,8 @@ hdiprint: hdiprint.cpp
 hdifuse: hdifuse.cpp fat12.cpp file.cpp util.cpp codepage.cpp ms932.cpp
 	$(CXX) $(CXXFLAGS) -pthread -lfuse3 -I/usr/include/fuse3  $^ -o $@
 
+hdifdisk: hdifdisk.cpp fat12.cpp util.cpp file.cpp
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 clean:
-	rm -f hdiimgmanip hdifat12print hdifuse
+	rm -f hdiimgmanip hdifat12print hdifuse hdifdisk
