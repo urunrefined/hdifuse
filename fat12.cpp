@@ -471,7 +471,7 @@ static void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
         for (uint16_t i = 0; i < entries; i++) {
             FileEntry *entry = (FileEntry *)(curBuffer + i * 32);
 
-            if(entry->isValid()){
+            if (entry->isValid()) {
                 printFileEntry(*entry, depth * 4);
             }
 
@@ -488,8 +488,8 @@ static void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
 }
 
 void printRootDirectoryRecursive(Region &fatRegion, Region &dataRegion,
-                                        uint8_t *rootRegionBuffer, uint16_t entries,
-                                        size_t clusterSize) {
+                                 uint8_t *rootRegionBuffer, uint16_t entries,
+                                 size_t clusterSize) {
     for (uint16_t i = 0; i < entries; i++) {
         // TODO Replace
         FileEntry *entry = (FileEntry *)(rootRegionBuffer + i * 32);

@@ -507,7 +507,7 @@ static void printDirectoryRecursive(Region &fatRegion, Region &dataRegion,
         for (uint16_t i = 0; i < entries; i++) {
             FileEntry *entry = (FileEntry *)(curBuffer + i * 32);
 
-            if(entry->isValid()){
+            if (entry->isValid()) {
                 printFileEntry(*entry, depth * 4);
             }
 

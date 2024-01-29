@@ -131,7 +131,7 @@ void syncFAT(BPB &bootBlock, Volume &volume);
 void printFileEntry(FileEntry &entry, uint32_t padding);
 
 void printRootDirectoryRecursive(Region &fatRegion, Region &dataRegion,
-                                        uint8_t *rootRegionBuffer, uint16_t entries,
-                                        size_t clusterSize);
+                                 uint8_t *rootRegionBuffer, uint16_t entries,
+                                 size_t clusterSize);
 
 #endif // FAT12_H

@@ -50,21 +50,21 @@ and will print various information.
 
 You may call hdifdisk via *./hdifdisk 'HDIFILE'*
 
-For showing information on all clusters in the first fat table
-use *./hdifdisk -l 'HDIFILE'* or specify the FAT table indices after *-l*
+For showing information on all clusters in the first FAT
+use *./hdifdisk -l 'HDIFILE'* or specify the FAT indices after *-l*
 to show a selection
 
-hdifdisk will show found orphans, which are indices in the fat table, which are not
+hdifdisk will show found orphans, which are indices in the FAT, which are not
 referenced in any of the files on the file-system. This may or may not be an actual
 error.
 
-To modify an FAT12 index of the first fat table use *./hdifdisk -m 'index' -s 'value' 'HDIFILE'*
+To modify an FAT12 index of the first FAT use *./hdifdisk -m 'index' -s 'value' 'HDIFILE'*
 Make sure to backup the image first.
 
 Example, to free orphans 33 and 1045 use ./hdifdisk -m 33 1045 -s 0 'HDIFILE'
 
-Please note afterwards this action will sync all fat tables in the fat region with the first
-fat table.
+Please note afterwards this action will sync all FATs in the FAT region with the first
+FAT.
 
 ## Limitations
 Please note the following limitations:
