@@ -80,5 +80,6 @@ Please note the following limitations:
 * There is no way to set MS-DOS specific attributes on files
 * Directory clusters which do not contain any valid files are not truncated
 * The only end of chain cluster considered is 0xFFF
-* On hdiprint/hdifdisk the right codepage, MS932, is not used to display filenames
+* There are no checks for < clusters less or equal to cluster 2 when stepping through cluster chains and accessing the data region
+* There are no checks for checking the fat clusters are in range of the data region
 * There are probably lots of bugs

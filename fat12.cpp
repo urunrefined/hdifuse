@@ -1,4 +1,5 @@
 #include "fat12.h"
+#include "codepage.h"
 #include "util.h"
 
 #include <assert.h>
@@ -419,7 +420,7 @@ void printFileEntry(FileEntry &entry, uint32_t padding) {
         // TODO: 0x05 in filename [0] indicates a special variant and should
         // be replaced by 0xe5 when printed
         leftPad(padding);
-        printf("%.8s.%.3s ", entry.filename, entry.filename + 8);
+        printf("%s", getCanonicalString(entry.filename).c_str());
     }
 
     printf("[%c", (entry.attr & ATTR_READ_ONLY) ? 'R' : ' ');
