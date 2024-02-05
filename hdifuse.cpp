@@ -855,7 +855,7 @@ static void trunc(FileEntry *entry, Region &fatRegion) {
         FatEntry fatEntry = getFatEntry(fatRegion, cluster);
         // printf("TRUNC cluster %hu\n", cluster);
         cluster = fatEntry.getValue();
-        fatEntry.setValue(0xFFF);
+        fatEntry.setValue(0x000);
     }
 
     entry->firstDataClusterLow = 0;
