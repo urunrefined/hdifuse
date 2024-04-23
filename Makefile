@@ -16,4 +16,4 @@ hdifdisk: hdifdisk.cpp fat12.cpp util.cpp codepage.cpp ms932.cpp file.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 clean:
-	rm -f hdiimgmanip hdifat12print hdifuse hdifdisk
+	rm -f hdifdisk hdifuse hdimanip hdiprint
