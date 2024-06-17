@@ -2,7 +2,9 @@
 
 The binaries compiled by this project will allow you to mount and examine
 the first FAT12 Volume in a HDI file. HDI files are basically images,
-which most likely contain a FAT12 volume somewhere inside of them.
+which most likely contain a FAT12 volume somewhere inside of them. This
+works with HDM files as well, if (and only if) the disk is formatted as a
+FAT12 Volume.
 
 Using these tools these volumes can be mounted, information about the HDI file printed,
 and files deleted, modified and added, the additions being written to the
