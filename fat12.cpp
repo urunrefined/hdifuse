@@ -317,14 +317,6 @@ void FatEntry::setValue(uint16_t value) const {
     }
 }
 
-FatEntry FatEntry::next() const {
-    if (odd) {
-        return {ptr + 2, true};
-    }
-
-    return {ptr + 1, false};
-}
-
 Fat12Volume getFatVolume(std::vector<uint8_t> &filedata) {
     // Volume starts here as well
     const auto &regionBPB = scanForBPBRegion(filedata);

@@ -110,8 +110,6 @@ struct FatEntry {
 
     uint16_t getValue() const;
     void setValue(uint16_t value) const;
-
-    FatEntry next() const;
 };
 
 struct Fat12Volume {
