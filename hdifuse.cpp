@@ -1435,6 +1435,7 @@ int main(int argc, char *argv[]) {
         {
             FileDescriptorWO fdwo(shadowFilename.c_str());
             ret = pumpBuffer(filedata, fdwo.fd);
+            fsync(fdwo.fd);
         }
 
         if (ret) {
