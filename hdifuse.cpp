@@ -1256,24 +1256,22 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
                 parent->children.erase(std::find(
                     parent->children.begin(), parent->children.end(), *child));
 
-                fuse_reply_err(req, 0);
+                fuse_reply_none(req);
                 return;
             }
 
             printf("Ino has %lu lookups remaining\n", child->nlookup);
-            fuse_reply_err(req, 0);
+            fuse_reply_none(req);
             return;
 
         } else {
             printf("File %lu not found for unlinking\n", ino);
         }
 
-        fuse_reply_err(req, ENOENT);
-    } catch (int err) {
-        fuse_reply_err(req, err);
     } catch (...) {
-        fuse_reply_err(req, ENOMEM);
     }
+    
+    fuse_reply_none(req);
 }
 
 class FuseArgs {
