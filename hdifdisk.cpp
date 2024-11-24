@@ -24,8 +24,8 @@ static bool checkChain(Region &fatRegion, FileEntry *file,
                        uint16_t clusterToBeFound) {
     uint16_t clusterNumber = file->firstDataClusterLow;
 
-    if(clusterNumber == 0){
-        //File empty
+    if (clusterNumber == 0) {
+        // File empty
         return false;
     }
 

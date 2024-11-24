@@ -536,7 +536,7 @@ static void getDateTime(uint16_t date, uint16_t clock, struct tm &result) {
     memset(&temp, 0, sizeof(temp));
 
     {
-        uint8_t day = (date)&0b1'1111;
+        uint8_t day = (date) & 0b1'1111;
         uint8_t month = (date >> 5) & 0b1111;
         uint8_t year = (date >> (5 + 4));
 
@@ -971,6 +971,57 @@ static void fat12_ll_release(fuse_req_t req, fuse_ino_t ino,
     }
 }
 
+template <class T1> class RevertData {
+    T1 *original;
+    T1 backup;
+    bool revert = true;
+
+  public:
+    RevertData(T1 *entry) : original(entry), backup(*original) {}
+
+    void drop() { revert = false; }
+
+    ~RevertData() {
+        if (revert) {
+            *original = backup;
+        }
+    }
+};
+
+template <class T1> class RevertVectorPush {
+    std::vector<T1> &ref;
+    bool revert = true;
+
+  public:
+    RevertVectorPush(std::vector<T1> &ref_) : ref(ref_) {}
+
+    void drop() { revert = false; }
+
+    ~RevertVectorPush() {
+        if (revert) {
+            ref.pop_back();
+        }
+    }
+};
+
+class RevertFileHandle {
+    FuseContext &fuseContext;
+    uint64_t handle;
+    bool revert = true;
+
+  public:
+    RevertFileHandle(FuseContext &fuseContext, uint64_t handle_)
+        : fuseContext(fuseContext), handle(handle_) {}
+
+    void drop() { revert = false; }
+
+    ~RevertFileHandle() {
+        if (revert) {
+            fuseContext.releaseFile(handle);
+        }
+    }
+};
+
 static void fat12_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
                             mode_t mode, struct fuse_file_info *fi) {
     try {
@@ -993,67 +1044,78 @@ static void fat12_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
             return;
         }
 
+        RevertData revertFat12Inode(inode);
+
         uint64_t handle = fuseContext->getFreeFileHandle();
+        RevertFileHandle revertHandle(*fuseContext, handle);
 
         FileEntry *entry = inode->getFreeFileEntry(fuseContext->fat12Volume);
 
         if (!entry) {
             printf("Cannot allocate additional entry\n");
-            fuseContext->releaseFile(handle);
             fuse_reply_err(req, ENOMEM);
             return;
         }
 
-        FileEntry backup = *entry;
+        RevertData revertFileEntry(entry);
 
         entry->reset();
         memcpy(entry->filename, dosName, sizeof(entry->filename));
 
         if (!entry->isValid()) {
-            printf("Entry still invalid\n");
-            fuseContext->releaseFile(handle);
-            (*entry) = backup;
+            printf("New entry invalid\n");
             fuse_reply_err(req, EFAULT);
             return;
         }
 
-        Fat12Inode inodeBackup = *inode;
+        Fat12Inode newInode(fuseContext->fat12Volume, entry,
+                            fuseContext->inodeCounter);
 
-        try {
-            Fat12Inode newInode(fuseContext->fat12Volume, entry,
-                                fuseContext->inodeCounter);
-            newInode.nlookup = 1;
+        newInode.nlookup = 1;
 
-            inode->children.push_back(newInode);
+        inode->children.push_back(newInode);
 
-            fuseContext->activeFiles.push_back(
-                std::make_unique<FuseFile>(handle, newInode));
+        RevertVectorPush revertVectorInode(inode->children);
 
-            struct fuse_entry_param e;
-            memset(&e, 0, sizeof(e));
-            e.ino = newInode.inode;
-            e.attr_timeout = 1.0;
-            e.entry_timeout = 1.0;
+        fuseContext->activeFiles.push_back(
+            std::make_unique<FuseFile>(handle, newInode));
 
-            fat12_stat(newInode.inode, fuseContext, &e.attr);
+        RevertVectorPush revertVectorActiveFiles(fuseContext->activeFiles);
 
-            fi->fh = handle;
+        struct fuse_entry_param e;
+        memset(&e, 0, sizeof(e));
+        e.ino = newInode.inode;
+        e.attr_timeout = 1.0;
+        e.entry_timeout = 1.0;
 
-            fuse_reply_create(req, &e, fi);
+        fat12_stat(newInode.inode, fuseContext, &e.attr);
 
-        } catch (...) {
-            fuseContext->releaseFile(handle);
-            (*entry) = backup;
-            (*inode) = inodeBackup;
+        fi->fh = handle;
 
-            fuse_reply_err(req, ENOMEM);
-        }
+        revertFileEntry.drop();
+        revertHandle.drop();
+        revertFat12Inode.drop();
+
+        revertVectorInode.drop();
+        revertVectorActiveFiles.drop();
+
+        fuse_reply_create(req, &e, fi);
 
     } catch (int err) {
         fuse_reply_err(req, err);
     } catch (...) {
         fuse_reply_err(req, ENOMEM);
     }
+}
+
+static void fat12_ll_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name,
+                           mode_t mode) {
+
+    (void)parent;
+    (void)name;
+    (void)mode;
+
+    fuse_reply_err(req, ENOENT);
 }
 
 static void fat12_ll_write(fuse_req_t req, fuse_ino_t ino, const char *buf,
@@ -1178,6 +1240,14 @@ static void cleanDirectoryFiles(Fat12Inode *fuseDir, BPB &bootBlock,
     }
 }
 
+static void fat12_ll_rmdir(fuse_req_t req, fuse_ino_t parent,
+                           const char *name) {
+
+    (void)parent;
+    (void)name;
+    fuse_reply_err(req, ENOENT);
+}
+
 static void fat12_ll_unlink(fuse_req_t req, fuse_ino_t parent,
                             const char *name) {
     try {
@@ -1270,7 +1340,7 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
 
     } catch (...) {
     }
-    
+
     fuse_reply_none(req);
 }
 
@@ -1383,9 +1453,11 @@ int main(int argc, char *argv[]) {
             fat12_ll_ops.open = fat12_ll_open;
             fat12_ll_ops.read = fat12_ll_read;
             fat12_ll_ops.create = fat12_ll_create;
+            fat12_ll_ops.mkdir = fat12_ll_mkdir;
             fat12_ll_ops.release = fat12_ll_release;
             fat12_ll_ops.opendir = fat12_ll_opendir;
             fat12_ll_ops.releasedir = fat12_ll_releasedir;
+            fat12_ll_ops.rmdir = fat12_ll_rmdir;
             fat12_ll_ops.unlink = fat12_ll_unlink;
             fat12_ll_ops.forget = fat12_ll_forget;
 
