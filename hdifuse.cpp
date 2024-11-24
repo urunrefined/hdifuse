@@ -522,8 +522,31 @@ class FuseContext {
     }
 };
 
-// Return a valid time, otherwise return all zero
-static void getDateTime(uint16_t date, uint16_t clock, struct tm &result) {
+static void getFAT12TimeDate(struct tm curDateTime, uint16_t &dateRet,
+                             uint16_t &clockRet) {
+    dateRet = 0;
+    clockRet = 0;
+
+    // Clamp between (inclusive) 1980 and (inclusive) 2107
+    curDateTime.tm_year = std::max(80, curDateTime.tm_year);
+    curDateTime.tm_year = std::min(207, curDateTime.tm_year);
+
+    // Normalize to 0...127
+    curDateTime.tm_year -= 80;
+
+    dateRet |= (curDateTime.tm_mday);
+    // tm expects month 0...11, FAT12 stores 1...12
+    dateRet |= (curDateTime.tm_mon + 1) << 5;
+    dateRet |= (curDateTime.tm_year) << 9;
+
+    clockRet |= curDateTime.tm_sec / 2;
+    clockRet |= curDateTime.tm_min << 5;
+    clockRet |= curDateTime.tm_hour << 11;
+}
+
+// Return a valid time, otherwise return 1.1.1980
+static void getDateTimeFromFAT(uint16_t date, uint16_t clock,
+                               struct tm &result) {
     memset(&result, 0, sizeof(result));
     result.tm_year = 80;
     result.tm_mday = 1;
@@ -536,11 +559,16 @@ static void getDateTime(uint16_t date, uint16_t clock, struct tm &result) {
     memset(&temp, 0, sizeof(temp));
 
     {
+        // Bits 0...4, range 1...31
         uint8_t day = (date) & 0b1'1111;
+
+        // Bits 5...8, range 1...12
         uint8_t month = (date >> 5) & 0b1111;
+
+        // Bits 9...15, 0...127
         uint8_t year = (date >> (5 + 4));
 
-        if (day == 0 || day > 31) {
+        if (day > 31) {
             return;
         }
 
@@ -548,17 +576,25 @@ static void getDateTime(uint16_t date, uint16_t clock, struct tm &result) {
             return;
         }
 
-        // year doesn't need to be checked, as its 7 bits are always valid
-
-        // DOS epoch starts at 1980 instead of 1970
+        // Year doesn't need to be checked, as its 7 bits are always valid
+        /*
+            DOS epoch starts at 1980 instead of 1970.
+            TM However starts at 1900, so add the epoch year offset (80)
+            to the data stored on disk
+        */
         temp.tm_year = 80 + year;
-        temp.tm_mon = month;
+
+        // tm expects month 0...11, FAT12 stores 1...12
+        temp.tm_mon = month - 1;
         temp.tm_mday = day;
     }
 
     {
+        // Bits 0...4 (2 second interval)
         uint8_t seconds = (clock & 0b1'1111) * 2;
+        // Bits 5...10, range 0...59
         uint8_t minutes = ((clock >> 5) & 0b11'1111);
+        // Bits 11...15, range 0...23
         uint8_t hours = (clock >> (5 + 6));
 
         if (seconds > 58) {
@@ -604,10 +640,10 @@ static int fat12_stat(fuse_ino_t ino, FuseContext *userdata,
     // listed as "birth time" getDateTime(entry->creationDate,
     // entry->creationTime,result);
 
-    getDateTime(entry->lastAccessDate, 0, result);
+    getDateTimeFromFAT(entry->lastAccessDate, 0, result);
     stbuf->st_atim = {timegm(&result), 0};
 
-    getDateTime(entry->writeDate, entry->writeTime, result);
+    getDateTimeFromFAT(entry->writeDate, entry->writeTime, result);
     stbuf->st_mtim = {timegm(&result), 0};
     // There is no status change info, so just copy the modified one
     stbuf->st_ctim = stbuf->st_mtim;
@@ -1066,6 +1102,31 @@ static void fat12_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
             printf("New entry invalid\n");
             fuse_reply_err(req, EFAULT);
             return;
+        }
+
+        {
+            time_t curSec = time(0);
+            tm cal;
+
+            if (!gmtime_r(&curSec, &cal)) {
+                printf("Cannot convert time to calender");
+                fuse_reply_err(req, EFAULT);
+                return;
+            }
+
+            uint16_t dateRet;
+            uint16_t clockRet;
+
+            getFAT12TimeDate(cal, dateRet, clockRet);
+
+            entry->creationTimeTenth = 0;
+            entry->creationTime = clockRet;
+            entry->creationDate = dateRet;
+
+            entry->lastAccessDate = dateRet;
+
+            entry->writeTime = clockRet;
+            entry->writeDate = dateRet;
         }
 
         Fat12Inode newInode(fuseContext->fat12Volume, entry,
