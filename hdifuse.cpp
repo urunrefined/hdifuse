@@ -709,7 +709,6 @@ static void fat12_ll_getattr(fuse_req_t req, fuse_ino_t ino,
                              struct fuse_file_info *fi) {
 
     try {
-
         (void)fi;
 
         FuseContext *userdata = (FuseContext *)fuse_req_userdata(req);
@@ -737,6 +736,9 @@ static void lookup(fuse_req_t req, const char *name,
     FuseContext *userdata = (FuseContext *)fuse_req_userdata(req);
 
     for (size_t i = 0; i < children.size(); i++) {
+        if (children[i].zombie)
+            continue;
+
         FileEntry *entry = children[i].file;
 
         std::string canonicalFilename = getCanonicalString(entry->filename);
@@ -1498,11 +1500,20 @@ static void fat12_ll_rmdir(fuse_req_t req, fuse_ino_t parent,
             for (size_t i = 0; i < parentNode->children.size(); i++) {
                 Fat12Inode &child = parentNode->children[i];
 
-                if (getCanonicalString(child.file->filename) == name) {
-                    // . and .. should be present -- nothing else
-                    if (child.children.size() != 2) {
-                        fuse_reply_err(req, ENOTEMPTY);
+                if (!child.zombie &&
+                    getCanonicalString(child.file->filename) == name) {
+                    // . and .. and zombies should be present -- nothing else
+                    if (child.children.size() < 2) {
+                        fuse_reply_err(req, EFAULT);
                         return;
+                    }
+
+                    for (size_t i = 2; i < child.children.size(); i++) {
+                        if (!child.children[i].zombie) {
+                            printf("Directory is not empty\n");
+                            fuse_reply_err(req, ENOTEMPTY);
+                            return;
+                        }
                     }
 
                     child.zombie = true;
@@ -1536,7 +1547,8 @@ static void fat12_ll_unlink(fuse_req_t req, fuse_ino_t parent,
             for (size_t i = 0; i < parentNode->children.size(); i++) {
                 Fat12Inode &child = parentNode->children[i];
 
-                if (getCanonicalString(child.file->filename) == name) {
+                if (!child.zombie &&
+                    getCanonicalString(child.file->filename) == name) {
 
                     if (context->isInUse(child.inode)) {
                         fuse_reply_err(req, EBUSY);
