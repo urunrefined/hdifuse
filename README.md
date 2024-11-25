@@ -72,16 +72,14 @@ FAT.
 Please note the following limitations:
 
 * The codepage is assumed to be MS932. _ANY OTHER CODEPAGE IN A FAT12 VOLUME CONTAINED IN A HDI FILE WILL GIVE YOU GARBAGE_. If the volume filenames are encoded in JIS X 0201, this should also work, as MS932 is compatible with this
-* There is no support for directory creation / deletion (I simply havent had any reason to implement this yet)
-* There is no support for "forgetting" files which have a positive lookup counter. Files will however be forgotten instantly when unlink -> forget is called. This is because I simply have no way of testing this properly. I have so much ram the kernel never ever frees any cached inodes. There is also no way (as far as I know anyway) to force the kernel to mount an FS in a more aggressive forgetting mode
 * There is no support for extending IO.SYS/MSDOS.SYS. DO NOT MODIFY IO.SYS or MSDOS.SYS if these changes cause clusters to be allocated for these files, which would lead to the cluster-chain for these files to not be contigious
 * Read only file attributes are ignored
 * Hidden file attributes are ignored
 * Any string given of an operation done on this specific fusefs layer is assumed to be utf8. Anything else will probably not work
-* There is no way of adding directories, only files
 * There is no way to set MS-DOS specific attributes on files
-* Directory clusters which do not contain any valid files are not truncated
+* Directory clusters belonging to a directory, which do not contain any valid files, are not truncated
 * The only end of chain cluster considered is 0xFFF
 * There are no checks for < clusters less or equal to cluster 2 when stepping through cluster chains and accessing the data region
 * There are no checks for checking the fat clusters are in range of the data region
+* The entries in directories are not sorted nicely by type / name
 * There are probably lots of bugs

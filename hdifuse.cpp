@@ -106,15 +106,15 @@ class Fat12Inode {
     }
 
     Fat12Inode *findParent(uint32_t inode_) {
-        if (inode_ == inode) {
-            return this;
+        for (auto &child : children) {
+            if (child.inode == inode_)
+                return this;
         }
 
         for (auto &child : children) {
             Fat12Inode *result = child.findParent(inode_);
-            if (result) {
-                return this;
-            }
+            if (result)
+                return result;
         }
 
         return 0;
@@ -308,6 +308,13 @@ std::unique_ptr<Memory> readFile(FileEntry *entry, Fat12Volume &volume,
                            volume.clusterSize, size, off);
 }
 
+static void wipe(Region &dataRegion, size_t clusterSize, uint16_t cluster,
+                 int pattern) {
+    uint8_t *ptr = dataRegion.ptr + ((cluster - 2) * clusterSize);
+
+    memset(ptr, pattern, clusterSize);
+}
+
 static size_t writeCluster(Region &dataRegion, size_t clusterSize,
                            ClusterPos &pos, size_t writeCount,
                            const char *data) {
@@ -412,7 +419,7 @@ static size_t writeFile(Region &fatRegion, Region &dataRegion, FileEntry *file,
 }
 
 static void f_unlink(Region &fatRegion, FileEntry *file) {
-    printf("CLUSTER %hu \n", (uint16_t)file->firstDataClusterLow);
+    printf("CLUSTER %hu\n", (uint16_t)file->firstDataClusterLow);
 
     if (file->firstDataClusterLow == 0) {
         file->reset();
@@ -451,6 +458,28 @@ class FuseFile {
         : handle(handle_), inode(inode_) {}
 };
 
+class Fat12DirEntry {
+  public:
+    uint32_t inode;
+    FileEntry entry;
+};
+
+class FuseDir {
+  public:
+    uint64_t handle;
+    std::vector<Fat12DirEntry> entries;
+
+    FuseDir(uint64_t handle_, Fat12Inode &parent) : handle(handle_) {
+        entries.reserve(parent.children.size());
+
+        for (Fat12Inode &child : parent.children) {
+            if (!child.zombie) {
+                entries.push_back({child.inode, *(child.file)});
+            }
+        }
+    }
+};
+
 class FuseContext {
   public:
     Fat12Volume &fat12Volume;
@@ -459,18 +488,23 @@ class FuseContext {
     Fat12Inode rootInode;
     Mutex mutex;
     std::vector<std::unique_ptr<FuseFile>> activeFiles;
+    std::vector<std::unique_ptr<FuseDir>> activeDirs;
 
     FuseContext(Fat12Volume &fat12Volume_)
-        : fat12Volume(fat12Volume_),
-          // rootInode gets inode number 1, which is
-          // the root directory in FUSE
-          inodeCounter(1), entry("root      ", ATTR_DIRECTORY),
+        : fat12Volume(fat12Volume_), inodeCounter(FUSE_ROOT_ID),
+          entry("root      ", ATTR_DIRECTORY),
           rootInode(fat12Volume, &entry,
                     fat12Volume.regionBPB.bootBlock.rootEntries,
                     fat12Volume.rootRegion.ptr, inodeCounter) {}
 
     bool existsFile(uint64_t handle) {
         for (auto &cDir : activeFiles) {
+            if (cDir->handle == handle) {
+                return true;
+            }
+        }
+
+        for (auto &cDir : activeDirs) {
             if (cDir->handle == handle) {
                 return true;
             }
@@ -503,10 +537,28 @@ class FuseContext {
         return 0;
     }
 
+    FuseDir *getOpenDirectory(uint64_t handle) {
+        for (auto &cDir : activeDirs) {
+
+            if (cDir->handle == handle) {
+                printf("Get open file %ld\n", handle);
+                return &(*cDir);
+            }
+        }
+
+        return 0;
+    }
+
     void releaseFile(uint64_t handle) {
         for (size_t i = 0; i < activeFiles.size(); i++) {
             if (activeFiles[i]->handle == handle) {
                 activeFiles.erase(activeFiles.begin() + i);
+            }
+        }
+
+        for (size_t i = 0; i < activeDirs.size(); i++) {
+            if (activeDirs[i]->handle == handle) {
+                activeDirs.erase(activeDirs.begin() + i);
             }
         }
     }
@@ -738,17 +790,17 @@ static void fat12_ll_lookup(fuse_req_t req, fuse_ino_t parent,
     }
 }
 
-static size_t getDirectoryInodeBufferSize(fuse_req_t req, Fat12Inode &inode,
+static size_t getDirectoryInodeBufferSize(fuse_req_t req,
+                                          std::vector<Fat12DirEntry> &entries,
                                           size_t maxSize, off_t off) {
     struct stat stbuf;
     memset(&stbuf, 0, sizeof(stbuf));
     size_t curSize = 0;
 
-    for (size_t i = off; i < inode.children.size(); i++) {
-        FileEntry *entry = inode.children[i].file;
-        std::string filename = getCanonicalString(entry->filename);
-
-        stbuf.st_ino = inode.children[i].inode;
+    for (size_t i = off; i < entries.size(); i++) {
+        const FileEntry &entry = entries[i].entry;
+        std::string filename = getCanonicalString(entry.filename);
+        stbuf.st_ino = entries[i].inode;
 
         size_t entrysize =
             fuse_add_direntry(req, 0, 0, filename.c_str(), &stbuf, i + 1);
@@ -764,24 +816,21 @@ static size_t getDirectoryInodeBufferSize(fuse_req_t req, Fat12Inode &inode,
 }
 
 static void addDirectoryInode(FuseContext *userdata, std::vector<uint8_t> &vec,
-                              fuse_req_t req, Fat12Inode &inode, size_t maxSize,
-                              off_t off) {
-
-    struct stat stbuf;
-    memset(&stbuf, 0, sizeof(stbuf));
-
+                              fuse_req_t req,
+                              const std::vector<Fat12DirEntry> &entries,
+                              size_t maxSize, off_t off) {
     size_t bufsz = 0;
 
-    for (size_t i = off; i < inode.children.size(); i++) {
-
-        FileEntry *entry = inode.children[i].file;
+    for (size_t i = off; i < entries.size(); i++) {
+        const FileEntry &entry = entries[i].entry;
         // printFileEntry(*entry, 0);
         //  hexdump((uint8_t *)entry, sizeof(*entry));
 
-        std::string filename = getCanonicalString(entry->filename);
+        std::string filename = getCanonicalString(entry.filename);
 
-        stbuf.st_ino = inode.children[i].inode;
-        fat12_stat(inode.children[i].inode, userdata, &stbuf);
+        struct stat stbuf;
+        memset(&stbuf, 0, sizeof(stbuf));
+        fat12_stat(entries[i].inode, userdata, &stbuf);
 
         size_t addch = fuse_add_direntry(req, (char *)vec.data() + bufsz,
                                          vec.size() - bufsz, filename.c_str(),
@@ -799,7 +848,6 @@ static void fat12_ll_opendir(fuse_req_t req, fuse_ino_t ino,
                              struct fuse_file_info *fi) {
 
     try {
-
         FuseContext *context = (FuseContext *)fuse_req_userdata(req);
         LockGuard lg(context->mutex);
 
@@ -808,8 +856,8 @@ static void fat12_ll_opendir(fuse_req_t req, fuse_ino_t ino,
         if (fat12Inode) {
             uint64_t handle = context->getFreeFileHandle();
 
-            context->activeFiles.push_back(
-                std::make_unique<FuseFile>(handle, *fat12Inode));
+            context->activeDirs.push_back(
+                std::make_unique<FuseDir>(handle, *fat12Inode));
 
             fi->fh = handle;
 
@@ -834,14 +882,14 @@ static void fat12_ll_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
         FuseContext *context = (FuseContext *)fuse_req_userdata(req);
         LockGuard lg(context->mutex);
 
-        FuseFile *dir = context->getOpenFile(fi->fh);
+        FuseDir *dir = context->getOpenDirectory(fi->fh);
 
         if (dir) {
             size_t bufsz =
-                getDirectoryInodeBufferSize(req, dir->inode, size, off);
+                getDirectoryInodeBufferSize(req, dir->entries, size, off);
 
             std::vector<uint8_t> buf(bufsz);
-            addDirectoryInode(context, buf, req, dir->inode, size, off);
+            addDirectoryInode(context, buf, req, dir->entries, size, off);
 
             if (!buf.empty()) {
                 fuse_reply_buf(req, (char *)buf.data(), buf.size());
@@ -1109,7 +1157,7 @@ static void fat12_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
             tm cal;
 
             if (!gmtime_r(&curSec, &cal)) {
-                printf("Cannot convert time to calender");
+                printf("Cannot convert time to calendar\n");
                 fuse_reply_err(req, EFAULT);
                 return;
             }
@@ -1172,11 +1220,141 @@ static void fat12_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 static void fat12_ll_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name,
                            mode_t mode) {
 
-    (void)parent;
-    (void)name;
-    (void)mode;
+    try {
+        (void)mode;
 
-    fuse_reply_err(req, ENOENT);
+        printf("Mkdir %s\n", name);
+
+        FuseContext *fuseContext = (FuseContext *)fuse_req_userdata(req);
+        LockGuard lg(fuseContext->mutex);
+
+        uint8_t dosName[11];
+        if (!getDOSName((uint8_t *)name, dosName)) {
+            printf("Name invalid -- Cannot create node\n");
+            fuse_reply_err(req, EINVAL);
+            return;
+        }
+
+        Fat12Inode *parentInode = fuseContext->rootInode.findInode(parent);
+        if (!parentInode) {
+            printf("Cannot find inode in which to create entry\n");
+            fuse_reply_err(req, ENOTDIR);
+            return;
+        }
+
+        RevertData revertFat12Inode(parentInode);
+
+        FileEntry *newEntry =
+            parentInode->getFreeFileEntry(fuseContext->fat12Volume);
+
+        if (!newEntry) {
+            printf("Cannot allocate additional entry\n");
+            fuse_reply_err(req, ENOMEM);
+            return;
+        }
+
+        RevertData revertFileEntry(newEntry);
+
+        newEntry->reset();
+        newEntry->attr |= ATTR_DIRECTORY;
+        memcpy(newEntry->filename, dosName, sizeof(newEntry->filename));
+
+        if (!newEntry->isValid()) {
+            printf("New entry invalid\n");
+            fuse_reply_err(req, EFAULT);
+            return;
+        }
+
+        {
+            time_t curSec = time(0);
+            tm cal;
+
+            if (!gmtime_r(&curSec, &cal)) {
+                printf("Cannot convert time to calendar\n");
+                fuse_reply_err(req, EFAULT);
+                return;
+            }
+
+            uint16_t dateRet;
+            uint16_t clockRet;
+
+            getFAT12TimeDate(cal, dateRet, clockRet);
+
+            newEntry->creationTimeTenth = 0;
+            newEntry->creationTime = clockRet;
+            newEntry->creationDate = dateRet;
+
+            newEntry->lastAccessDate = dateRet;
+
+            newEntry->writeTime = clockRet;
+            newEntry->writeDate = dateRet;
+        }
+
+        Fat12Volume &volume = fuseContext->fat12Volume;
+
+        uint16_t newCluster =
+            getFreeCluster(volume.fatRegion, volume.maxCluster);
+
+        if (newCluster == 0xFFF) {
+            printf("Cannot alloc new cluster for directory\n");
+            fuse_reply_err(req, ENOSPC);
+            return;
+        }
+
+        newEntry->firstDataClusterLow = newCluster;
+
+        {
+            FileEntry dirs[2] = {*newEntry, *(parentInode->file)};
+
+            // Check if the parent is the root directory
+            if (dirs[1].firstDataClusterLow == 0) {
+                // As in FAT12 there is no root file,
+                // copy everyhing from the current directory over,
+                // except the first cluster, which still needs to be 0
+                dirs[1] = dirs[0];
+                dirs[1].firstDataClusterLow = 0;
+            }
+
+            memcpy(dirs[0].filename, ".          ", sizeof(dirs[0].filename));
+            memcpy(dirs[1].filename, "..         ", sizeof(dirs[1].filename));
+
+            ClusterPos pos = {newCluster, 0, 0};
+
+            FatEntry fatEntry = getFatEntry(volume.fatRegion, newCluster);
+            fatEntry.setValue(0xFFF);
+
+            wipe(volume.dataRegion, volume.clusterSize, newCluster, 0x00);
+
+            (void)writeCluster(volume.dataRegion, volume.clusterSize, pos,
+                               sizeof(dirs), (const char *)dirs);
+        }
+
+        Fat12Inode newInode(fuseContext->fat12Volume, newEntry,
+                            fuseContext->inodeCounter);
+
+        newInode.nlookup = 1;
+        parentInode->children.push_back(newInode);
+        RevertVectorPush revertVectorInode(parentInode->children);
+
+        struct fuse_entry_param e;
+        memset(&e, 0, sizeof(e));
+        e.ino = newInode.inode;
+        e.attr_timeout = 1.0;
+        e.entry_timeout = 1.0;
+
+        fat12_stat(newInode.inode, fuseContext, &e.attr);
+
+        revertFileEntry.drop();
+        revertFat12Inode.drop();
+
+        revertVectorInode.drop();
+
+        fuse_reply_entry(req, &e);
+
+    } catch (int err) {
+        fuse_reply_err(req, err);
+    } catch (...) {
+    }
 }
 
 static void fat12_ll_write(fuse_req_t req, fuse_ino_t ino, const char *buf,
@@ -1245,7 +1423,8 @@ static void cleanDirectoryFilesEntry(FileEntry *dir, Region &fatRegion,
     // Dirs always have a cluster alloced for . and .. (First two entries)
     assert(clusterNumber != 0);
 
-    uint32_t lastValidEntry = 2;
+    uint32_t lastValidEntry = 0;
+    uint32_t counter = 0;
 
     while (clusterNumber != 0xFFF) {
 
@@ -1258,8 +1437,10 @@ static void cleanDirectoryFilesEntry(FileEntry *dir, Region &fatRegion,
             FileEntry *entry = (FileEntry *)(curBuffer + i * 32);
 
             if (entry->isValid()) {
-                lastValidEntry = i;
+                lastValidEntry = counter;
             }
+
+            counter++;
         }
 
         clusterNumber = getFatEntry(fatRegion, clusterNumber).getValue();
@@ -1283,20 +1464,20 @@ static void cleanDirectoryFilesEntry(FileEntry *dir, Region &fatRegion,
             curEntry++;
         }
 
-        clusterNumber = dir->firstDataClusterLow;
+        clusterNumber = getFatEntry(fatRegion, clusterNumber).getValue();
     }
 }
 
-static void cleanDirectoryFiles(Fat12Inode *fuseDir, BPB &bootBlock,
+static void cleanDirectoryFiles(Fat12Inode &fuseDir, BPB &bootBlock,
                                 Region &rootRegion, Region &fatRegion,
                                 Region &dataRegion, uint32_t clusterSize) {
     // All files after the last valid file should have the first byte of their
     // filename set to 0
 
-    if (fuseDir->inode == FUSE_ROOT_ID) {
+    if (fuseDir.inode == FUSE_ROOT_ID) {
         cleanDirectoryFilesRoot(rootRegion, bootBlock.rootEntries);
     } else {
-        cleanDirectoryFilesEntry(fuseDir->file, fatRegion, dataRegion,
+        cleanDirectoryFilesEntry(fuseDir.file, fatRegion, dataRegion,
                                  clusterSize);
     }
 }
@@ -1304,9 +1485,39 @@ static void cleanDirectoryFiles(Fat12Inode *fuseDir, BPB &bootBlock,
 static void fat12_ll_rmdir(fuse_req_t req, fuse_ino_t parent,
                            const char *name) {
 
-    (void)parent;
-    (void)name;
-    fuse_reply_err(req, ENOENT);
+    try {
+        FuseContext *context = (FuseContext *)fuse_req_userdata(req);
+        LockGuard lg(context->mutex);
+        Fat12Inode &rootInode = context->rootInode;
+
+        printf("Rmdir %s\n", name);
+
+        Fat12Inode *parentNode = rootInode.findInode(parent);
+
+        if (parentNode) {
+            for (size_t i = 0; i < parentNode->children.size(); i++) {
+                Fat12Inode &child = parentNode->children[i];
+
+                if (getCanonicalString(child.file->filename) == name) {
+                    // . and .. should be present -- nothing else
+                    if (child.children.size() != 2) {
+                        fuse_reply_err(req, ENOTEMPTY);
+                        return;
+                    }
+
+                    child.zombie = true;
+                    fuse_reply_err(req, 0);
+                    return;
+                }
+            }
+        }
+
+        fuse_reply_err(req, ENOENT);
+    } catch (int err) {
+        fuse_reply_err(req, err);
+    } catch (...) {
+        fuse_reply_err(req, ENOMEM);
+    }
 }
 
 static void fat12_ll_unlink(fuse_req_t req, fuse_ino_t parent,
@@ -1317,7 +1528,7 @@ static void fat12_ll_unlink(fuse_req_t req, fuse_ino_t parent,
         LockGuard lg(context->mutex);
         Fat12Inode &rootInode = context->rootInode;
 
-        printf("unlink name %s\n", name);
+        printf("Unlink %s\n", name);
 
         Fat12Inode *parentNode = rootInode.findInode(parent);
 
@@ -1331,6 +1542,8 @@ static void fat12_ll_unlink(fuse_req_t req, fuse_ino_t parent,
                         fuse_reply_err(req, EBUSY);
                         return;
                     }
+
+                    printf("Lookup count %lu\n", child.nlookup);
 
                     child.zombie = true;
                     fuse_reply_err(req, 0);
@@ -1366,6 +1579,7 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
 
             if (child->nlookup == 0 && child->zombie) {
                 printf("Delete ino %lu\n", ino);
+                printFileEntry(*child->file, 0);
 
                 Fat12Inode *parent = rootInode.findParent(ino);
 
@@ -1375,11 +1589,14 @@ static void fat12_ll_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
                     return;
                 }
 
+                printf("Parent:\n");
+                printFileEntry(*parent->file, 0);
+
                 f_unlink(context->fat12Volume.fatRegion, child->file);
                 child->file->filename[0] = 0xE5;
 
                 cleanDirectoryFiles(
-                    parent, fat12Volume.regionBPB.bootBlock,
+                    *parent, fat12Volume.regionBPB.bootBlock,
                     fat12Volume.rootRegion, fat12Volume.fatRegion,
                     fat12Volume.dataRegion, fat12Volume.clusterSize);
 
@@ -1469,6 +1686,23 @@ class FuseMount {
     ~FuseMount() { fuse_session_unmount(se); }
 };
 
+static void purgeZombies(Fat12Volume &fat12Volume, Fat12Inode &parent) {
+
+    for (auto &child : parent.children) {
+        purgeZombies(fat12Volume, child);
+
+        if (child.zombie) {
+            f_unlink(fat12Volume.fatRegion, child.file);
+            child.file->filename[0] = 0xE5;
+
+            cleanDirectoryFiles(parent, fat12Volume.regionBPB.bootBlock,
+                                fat12Volume.rootRegion, fat12Volume.fatRegion,
+                                fat12Volume.dataRegion,
+                                fat12Volume.clusterSize);
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc == 0) {
@@ -1551,13 +1785,15 @@ int main(int argc, char *argv[]) {
 
             fuse_daemonize(fuseOpts.opts.foreground);
             fuse_session_loop(fuseSession.se);
+
+            printf("Purge remaining entries\n");
+            purgeZombies(fat12Volume, fuseContext.rootInode);
         }
 
         printf("Sync fat\n");
         syncFAT(fat12Volume.regionBPB.bootBlock, fat12Volume.volume);
 
         printf("Write file \n");
-
         chdir(cwd.c_str());
 
         std::string shadowFilename = filename + ".shadow";

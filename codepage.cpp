@@ -376,7 +376,7 @@ bool getDOSName(const uint8_t *codeName, uint8_t (&dosName)[8 + 3]) {
     return ret;
 }
 
-std::string getCanonicalString(uint8_t (&filename)[8 + 3]) {
+std::string getCanonicalString(const uint8_t (&filename)[8 + 3]) {
     std::optional<std::string> utf8Name = getUTF8Name(filename);
 
     if (!utf8Name) {

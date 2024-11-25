@@ -7,7 +7,7 @@
 #include <string>
 
 void hexdump(const uint8_t *buffer, size_t sz);
-std::string hexenc(uint8_t *buffer, size_t sz);
+std::string hexenc(const uint8_t *buffer, size_t sz);
 
 class Mutex {
   public:
