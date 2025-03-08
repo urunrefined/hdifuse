@@ -682,9 +682,14 @@ int main(int argc, char *argv[]) {
 
         printf("Process buffer %zu\n", filedata.size());
 
-        {
+        try{
             checkBootHeader(filedata);
-            
+        }
+        catch(...){
+            printf("No HDI Boot header found\n");
+        }
+
+        {
             // Volume starts here as well
             
             auto regionBPB = scanForBPBRegion(filedata);

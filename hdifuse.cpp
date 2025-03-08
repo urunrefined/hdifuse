@@ -1751,7 +1751,7 @@ int main(int argc, char *argv[]) {
 
         {
             FuseContext fuseContext(fat12Volume);
-            struct fuse_lowlevel_ops fat12_ll_ops {};
+            struct fuse_lowlevel_ops fat12_ll_ops{};
 
             fat12_ll_ops.readdir = fat12_ll_readdir;
             fat12_ll_ops.write = fat12_ll_write;

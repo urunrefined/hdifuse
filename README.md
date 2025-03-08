@@ -83,6 +83,7 @@ Please note the following limitations:
 * There are no checks for checking the fat clusters are in range of the data region
 * The entries in directories are not sorted nicely by type / name
 * There are probably lots of bugs
+* Moving (renaming) files doesnt work (not implemented)
 
 ## Notes
 
@@ -90,3 +91,8 @@ There are some disks that have an older format of the BIOS parameter
 block. If both the totalSectors32 and totalSectors16 fields are non-zero,
 hdifuse will ignore the totalsector32 field, even though one (and only one)
 of these fields should be set. A warning will be printed.
+
+hdiprint will not convert ms932 filenames to utf8
+and most likely will print garbage if it encounters such a file.
+This is to keep this program nice, simple and self-contained. All other
+programs will do a proper conversion.
