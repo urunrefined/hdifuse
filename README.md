@@ -83,3 +83,10 @@ Please note the following limitations:
 * There are no checks for checking the fat clusters are in range of the data region
 * The entries in directories are not sorted nicely by type / name
 * There are probably lots of bugs
+
+## Notes
+
+There are some disks that have an older format of the BIOS parameter
+block. If both the totalSectors32 and totalSectors16 fields are non-zero,
+hdifuse will ignore the totalsector32 field, even though one (and only one)
+of these fields should be set. A warning will be printed.

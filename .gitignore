@@ -21,3 +21,5 @@ DUMP*
 TODO
 *.bak
 *.shadow
+*.COM
+*.EXE

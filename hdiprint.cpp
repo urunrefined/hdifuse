@@ -140,7 +140,7 @@ static void checkSectorCount(uint16_t totalSectors16, uint32_t totalSectors32) {
     if ((!totalSectors16 && !totalSectors32) ||
         (totalSectors16 && totalSectors32)) {
         printf("SectorCounts are not valid\n");
-        throw -1;
+        printf("Will ignore totalSectors32 and use totalSectors16\n");
     }
 }
 
