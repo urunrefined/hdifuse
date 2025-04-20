@@ -620,7 +620,7 @@ static void getDateTimeFromFAT(uint16_t date, uint16_t clock,
         // Bits 9...15, 0...127
         uint8_t year = (date >> (5 + 4));
 
-        if (day > 31) {
+        if (day == 0 || day > 31) {
             return;
         }
 
